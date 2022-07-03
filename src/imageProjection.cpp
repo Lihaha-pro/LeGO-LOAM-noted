@@ -26,7 +26,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#include "utility.h"
+#include "../include/utility.h"
 
 
 class ImageProjection{
@@ -58,7 +58,7 @@ private:
     PointType nanPoint;
 
     cv::Mat rangeMat;
-    cv::Mat labelMat;
+    cv::Mat labelMat;//用于为非地面点进行聚类后的label赋值
     cv::Mat groundMat;
     int labelCount;
 
@@ -276,10 +276,10 @@ public:
         size_t lowerInd, upperInd;
         float diffX, diffY, diffZ, angle;
 
-        for (size_t j = 0; j < Horizon_SCAN; ++j){
-            // groundScanInd 是在 utility.h 文件中声明的线数，groundScanInd=7
+        for (size_t j = 0; j < Horizon_SCAN; ++j){//水平方向一根扫描线得到1800个点
+            // groundScanInd 是在 utility.h 文件中声明的线数，groundScanInd=7（实际上就是设置为线数一半，毕竟地面不可能跑到天上）
             for (size_t i = 0; i < groundScanInd; ++i){
-
+                //取出同一列上相邻两点的索引
                 lowerInd = j + ( i )*Horizon_SCAN;
                 upperInd = j + (i+1)*Horizon_SCAN;
 
@@ -287,7 +287,7 @@ public:
                 // 都是-1 证明是空点nanPoint
                 if (fullCloud->points[lowerInd].intensity == -1 ||
                     fullCloud->points[upperInd].intensity == -1){
-                    groundMat.at<int8_t>(i,j) = -1;
+                    groundMat.at<int8_t>(i,j) = -1;//标志位置为-1
                     continue;
                 }
 
@@ -298,9 +298,9 @@ public:
                 diffY = fullCloud->points[upperInd].y - fullCloud->points[lowerInd].y;
                 diffZ = fullCloud->points[upperInd].z - fullCloud->points[lowerInd].z;
 
-                angle = atan2(diffZ, sqrt(diffX*diffX + diffY*diffY) ) * 180 / M_PI;
+                angle = atan2(diffZ, sqrt(diffX*diffX + diffY*diffY)) * 180 / M_PI;//获得角度制的角
 
-                if (abs(angle - sensorMountAngle) <= 10){
+                if (abs(angle - sensorMountAngle) <= 10){//小于10°，认为是地面点
                     groundMat.at<int8_t>(i,j) = 1;
                     groundMat.at<int8_t>(i+1,j) = 1;
                 }
@@ -328,7 +328,10 @@ public:
             }
         }
     }
-
+    /**
+     * @brief 点云分类函数，对非地面点进行聚类处理
+     * 
+     */
     void cloudSegmentation(){
         for (size_t i = 0; i < N_SCAN; ++i)
             for (size_t j = 0; j < Horizon_SCAN; ++j)
@@ -400,20 +403,21 @@ public:
         float d1, d2, alpha, angle;
         int fromIndX, fromIndY, thisIndX, thisIndY; 
         bool lineCountFlag[N_SCAN] = {false};
-
+        //为了提高实时性，使用数组来实现聚类
         queueIndX[0] = row;
         queueIndY[0] = col;
         int queueSize = 1;
         int queueStartInd = 0;
-        int queueEndInd = 1;
+        int queueEndInd = 1;//指向最后一个元素后一个位置
 
         allPushedIndX[0] = row;
         allPushedIndY[0] = col;
-        int allPushedIndSize = 1;
+        int allPushedIndSize = 1;//当前队列里有多少个点
         
         // 标准的BFS
         // BFS的作用是以(row，col)为中心向外面扩散，
         // 判断(row,col)是否是这个平面中一点
+        ///以下就是具体的广度优先搜索
         while(queueSize > 0){
             fromIndX = queueIndX[queueStartInd];
             fromIndY = queueIndY[queueStartInd];
@@ -444,7 +448,7 @@ public:
 				// 如果labelMat已经标记为正整数，则已经聚类完成，不需要再次对该点聚类
                 if (labelMat.at<int>(thisIndX, thisIndY) != 0)
                     continue;
-
+                //d1为长边长度，d2为短边长度
                 d1 = std::max(rangeMat.at<float>(fromIndX, fromIndY), 
                               rangeMat.at<float>(thisIndX, thisIndY));
                 d2 = std::min(rangeMat.at<float>(fromIndX, fromIndY), 
@@ -453,6 +457,7 @@ public:
 				// alpha代表角度分辨率，
 				// X方向上角度分辨率是segmentAlphaX(rad)
 				// Y方向上角度分辨率是segmentAlphaY(rad)
+                ///水平方向角分辨率0.2度，垂直方向角分辨率2度，所以要进行选择
                 if ((*iter).first == 0)
                     alpha = segmentAlphaX;
                 else
@@ -460,11 +465,11 @@ public:
 
 				// 通过下面的公式计算这两点之间是否有平面特征
 				// atan2(y,x)的值越大，d1，d2之间的差距越小,越平坦
-                angle = atan2(d2*sin(alpha), (d1 -d2*cos(alpha)));
+                angle = atan2(d2*sin(alpha), (d1 -d2*cos(alpha)));///直接计算出角度大小
 
                 if (angle > segmentTheta){
 					// segmentTheta=1.0472<==>60度
-					// 如果算出角度大于60度，则假设这是个平面
+					// Step 如果算出角度大于60度，则假设这是个平面
                     queueIndX[queueEndInd] = thisIndX;
                     queueIndY[queueEndInd] = thisIndY;
                     ++queueSize;
@@ -486,7 +491,7 @@ public:
 		// 如果聚类超过30个点，直接标记为一个可用聚类，labelCount需要递增
         if (allPushedIndSize >= 30)
             feasibleSegment = true;
-        else if (allPushedIndSize >= segmentValidPointNum){
+        else if (allPushedIndSize >= segmentValidPointNum){///这里是由于竖直方向角分辨率小，所以降低标准去提取竖直方向的聚类特征
 			// 如果聚类点数小于30大于等于5，统计竖直方向上的聚类点数
             int lineCount = 0;
             for (size_t i = 0; i < N_SCAN; ++i)

@@ -75,7 +75,7 @@ extern const int imuQueLength = 200;
 extern const string imuTopic = "/imu/data";
 
 
-extern const float sensorMountAngle = 0.0;
+extern const float sensorMountAngle = 0.0;//如果Lidar不是水平安装，用该变量作为角度偏置
 extern const float segmentTheta = 1.0472; // segmentTheta=1.0472<==>60度,在imageProjection中用于判断平面
 extern const int segmentValidPointNum = 5;
 extern const int segmentValidLineNum = 3;
